@@ -100,18 +100,54 @@ contract Door {
     Image[] public images;
     User[] public users;
 
+    event ReportFalse(string _url, address sender);
+    event LikeFalse(string _url, address sender);
+    
+    enum there{
+        nul,
+        good,
+        bad
+    }
+
+    enum city{
+        nul,
+        shanghai,
+        beijing,
+        guangzhou,
+        shenzhen,
+        chengdu,
+        shenyang,
+        hangzhou,
+        xian,
+        chongqing,
+        tianjin,
+        qingdao,
+        shijiazhuang,
+        haerbin,
+        changchun,
+        xian,
+        yangzhou,
+        zhengzhou
+    }
+
     struct Image {
         string url;
         address owner;
         uint value;
         uint good;
         uint bad;
+        address[] reporter;
+        address[] liker;
+        // mapping(address => bool) isReported;
+        // mapping(address => bool) isLiked;
+
+        mapping(address => there) isAction;
     }
 
     struct User {
         address id; // 对应用户的钱包地址
         string[] ownImg; // 用户拥有的图片
-        string phone; 
+        uint money;
     }
 
     constructor() {
@@ -120,26 +156,82 @@ contract Door {
 
     // 上传图片 现在做法好像会有安全问题
     function addImg(string memory _url) external payable{ 
-        // Image memory img = Image(_url, msg.sender, 0, 0);
+        // Image memory img = Image(_url, msg.sender, 50, 0);
         // users[msg.sender].ownImg.push(img.url);
     }
 
 
     // 检查图片是否达到 点赞和点踩的一定比例
+    // true：删除图片 false：保留图片
     function checkImg(string memory _url) public view returns(bool f){
-        Image memory Img = imageMap[_url];
-        {address owner:Img.owner,uint good: Img.good,uint bad: Img.bad} = Img; 
+        Image storage Img = imageMap[_url];
+        if(Img.value == 0) return false;
+        address owner = Img.owner;
+        uint good = Img.good;
+        uint bad = Img.bad;        
+        f = bad*2 > good; 
+    }
+
+
+    // 删除图片
+    function delImg(string memory _url) public returns(bool f){
+        // require(msg.sender == owner, "only owner can delete image");
+        // todo:给后端发信息图床删图
+        Image storage Img = imageMap[_url];
+        if(Img.value == 0) return false;
         
-        f = true;
+        // owner.have - url
+        for(uint i = 0; i < Img.reporter.length; i++) {
+            userMap[Img.reporter[i]].money += Img.value / Img.reporter.length;
+        }
+        // Img.reporter
+        // reporter.moner += img.money
+        delete imageMap[_url];
+        return true;
     }
 
+    // 点赞
+    function likeAction(address sender, string memory _url) external returns(bool){
+        Image storage Img = imageMap[_url];
+        if(Img.value == 0) return false; 
+        if(Img.isAction[sender] == there.bad) {
+            Img.bad -= 1;
+            Img.isAction[sender] = there.good;
+        }
 
-    // 去除图片
-    function delImg() {
+        // Img.owner 不会有感觉
+        // 
 
+        return true;
     }
 
-    // 
+    // 举报
+    function reportAction(address sender, string memory _url) external returns(bool){
+        Image storage Img = imageMap[_url];
+        if(Img.value == 0) return false; 
+
+        if(Img.isAction[sender] == there.good) {
+            Img.good -= 1;   
+            // 删除喜欢的标记
+            delete Img.liker
+        } 
+
+        Img.good += 1;
+        Img.isAction[sender] = there.bad;
+
+        // if(!Img.isReported[sender]) {
+        //     Img.reporter.push(sender); 
+        //     Img.isReported[sender] = true;
+        //     Img
+        // }
+        // Img.isLiked(sender) = false;
+        
+        Img.bad += 1;
+        checkImg(_url);
+        return true;
+    }
+
+    // todo：打赏？
 
 
 }
