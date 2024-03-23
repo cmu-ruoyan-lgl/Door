@@ -4,7 +4,40 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 // import "@openzeppelin/contracts/utils/Counters.sol";
 
-contract Door {
+contract Door is IERC20{
+    uint public totalSupply;
+    mapping(address => uint) public balanceOf;
+    mapping(address => mapping(address => uint)) public allowance;
+    string public name = "Doy";
+    string public symbol = "DOY";
+    uint public decimals = 18;
+
+    function transfer(address to, uint256 value) external returns (bool) {
+        balanceOf[msg.sender] -= value;
+        balanceOf[to] += value;
+        emit Transfer(msg.sender, to, value);
+        return true;
+    }
+
+    function approve(address spender, uint256 value) external returns (bool){
+        allowance[msg.sender][spender] = value;
+        emit Approval(msg.sender, spender, value);
+        return true;
+    }
+
+    function transferFrom(
+        address from, 
+        address to, 
+        uint256 value
+    ) external returns (bool){
+        if(value > allowance[from][msg.sender]) return false;
+        allowance[from][msg.sender] -= value;
+        balanceOf[from] -= value;
+        balanceOf[to] += value;
+        emit Transfer(from, to, value);
+        return true;
+    }
+
     address public owner;
     mapping(string => Image) public imageMap;
     mapping(address => User) public userMap;
@@ -212,9 +245,9 @@ contract DoorCityNFT {
 
 用户登陆就是能用用户的钱包调用合约！！！
 
-task list
+todo task list
 - 随机访问 finished
-- 
+- 上传图床
 
 - 所有城市的拼音名称 
 */
