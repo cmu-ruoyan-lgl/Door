@@ -120,7 +120,7 @@ contract Door is IERC20, AccessControl{
         _;
     }
 
-    function createImage(string memory _url ) external returns(bool f) { 
+    function createImage(string memory _url ) external { 
         Image storage img = images.push();
         img.url = _url;
         img.owner = msg.sender;
