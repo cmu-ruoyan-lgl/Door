@@ -1,25 +1,58 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.21;
 
-// import {IERC20} from "./IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-// import "@openzeppelin/contracts/utils/Counters.sol";
 
 contract Door is IERC20, AccessControl{
+    // --- Auth ---
+    mapping (address => uint) public wards;
+    function rely(address guy) external auth { wards[guy] = 1; }
+    function deny(address guy) external auth { wards[guy] = 0; }
+    error noAuthorized(address);
+    modifier auth{
+        if(wards[msg.sender] != 1) revert noAuthorized(msg.sender);
+        _;
+    }
+
+    // --- AWARD PUNISHMENT VALUES ---
+    uint immutable private likeWeight = 5;
+    uint immutable private reportWeight = 18;
+    uint immutable private visitWeight = 1;
+    uint immutable private initGoodValue = 100;
+    uint immutable private initBadValue = 100;
+
+    // --- ERC20 Data ---
+    string public constant name   = "Doy";
+    string public constant symbol = "DOY";
+    string public constant version = "1";
+    uint8 public decimals = 18;
     uint public totalSupply;
+
     mapping(address => uint) public balanceOf;
     mapping(address => mapping(address => uint)) public allowance;
-    string public name = "Doy";
-    string public symbol = "DOY";
-    uint public decimals = 18;
+
+    // --- Token ---
+    function mint(address usr, uint value) external auth {
+        balanceOf[usr] = add(balanceOf[usr], value);
+        totalSupply    = add(totalSupply, value);
+        emit Transfer(address(0), usr, value);
+    }
+
+    function burn(address usr, uint value) external {
+        require(balanceOf[usr] >= value, "User does not have enough balance");
+        if (usr != msg.sender && allowance[usr][msg.sender] != type(uint).max) {
+            require(allowance[usr][msg.sender] >= value, "Dai/insufficient-allowance");
+            allowance[usr][msg.sender] = sub(allowance[usr][msg.sender], value);
+        }
+        balanceOf[usr] = sub(balanceOf[usr], value);
+        totalSupply    = sub(totalSupply, value);
+        emit Transfer(usr, address(0), value);
+    }
 
     function transfer(address to, uint256 value) external returns (bool) {
-        balanceOf[msg.sender] -= value;
-        balanceOf[to] += value;
-        emit Transfer(msg.sender, to, value);
-        return true;
+        return transferFrom(msg.sender, to, value);
     }
 
     function approve(address spender, uint256 value) external returns (bool){
@@ -32,7 +65,7 @@ contract Door is IERC20, AccessControl{
         address from, 
         address to, 
         uint256 value
-    ) external returns (bool){
+    ) public returns (bool){
         if(value > allowance[from][msg.sender]) return false;
         allowance[from][msg.sender] -= value;
         balanceOf[from] -= value;
@@ -41,23 +74,30 @@ contract Door is IERC20, AccessControl{
         return true;
     }
 
-    address public owner;
-    mapping(string => Image) public imageMap;
-    mapping(address => User) public userMap;
-    // mapping
+    // --- Math ---
+    function add(uint x, uint y) internal pure returns (uint z) {
+        require((z = x + y) >= x);
+    }
+    function sub(uint x, uint y) internal pure returns (uint z) {
+        require((z = x - y) <= x);
+    }
 
+    // --- Image Data --- 
     Image[] public images;
-    User[] public users;
+
+    mapping(string => Image) public imageMap;
+    mapping(address => mapping(string => bool)) visit; 
+    mapping(address => string[]) userImgs;
+
+    event ReportFalse(string _url, address sender);
+    event LikeFalse(string _url, address sender);
+    error ImageDoesNotExist(string _url);
 
     enum Attitude{
         nul,
         like,
         dislike
     }
-
-    event ReportFalse(string _url, address sender);
-    event LikeFalse(string _url, address sender);
-    error ImageDoesNotExist(string _url);
 
     struct Image {
         string url;
@@ -70,23 +110,8 @@ contract Door is IERC20, AccessControl{
         mapping(address => Attitude) isAction;
     }
 
-    struct User {
-        address id; // 对应用户的钱包地址
-        string[] ownimg; // 用户拥有的图片
-        uint money;
-        mapping(string => bool) visit;
-    }
-
     constructor() {
-        owner = msg.sender;
-    }
-
-    modifier userChecker() {
-        User storage user = userMap[msg.sender];
-        if(user.id == address(0)) {
-            user.id = msg.sender;
-        }
-        _;
+        wards[msg.sender] = 1;
     }
 
     modifier imageExistenceChecker(string memory _url) {
@@ -95,162 +120,74 @@ contract Door is IERC20, AccessControl{
         _;
     }
 
-
-    // 这个方法传参数后面要加图片的格式！！！
-    function uploadImage() public userChecker returns(string memory _url) {
-        // todo:上传图床功能
-        // string memory _url = 上传图床();
-    }
-
-    // 上传图片 现在做法好像会有安全问题
-    // 这个方法传参数后面要加图片的格式！！！
-    function addimg() external userChecker returns(bool f) { 
-        string memory _url = uploadImage();
-
-        // 将图放到合约中图库
+    function createImage(string memory _url ) external returns(bool f) { 
         Image storage img = images.push();
         img.url = _url;
         img.owner = msg.sender;
-        img.good = 50;
+        img.good = 100;
         img.bad = 0;
 
-        // images.push(img);
-        // 注册用户持有图片
-        userMap[msg.sender].ownimg.push(img.url);
+        userImgs[msg.sender].push(img.url);
     }
 
-
-    // 检查图片是否达到 点赞和点踩的一定比例
-    // true：要求删除图片 false：要求保留图片
-    function checkimg(string memory _url) public view imageExistenceChecker(_url) returns(bool f){
+    function checkImage(string memory _url) public view imageExistenceChecker(_url) returns(bool f){
         Image storage img = imageMap[_url];
-        // if(img.value == 0) return false;
-        // // address owner = img.owner;
         uint good = img.good;
         uint bad = img.bad;        
         f = bad * 2 > good; 
     }
 
-
-    // 删除图片
-    function delimg(string memory _url) public imageExistenceChecker(_url) returns(bool f){
-        // require(msg.sender == owner, "only owner can delete image");
-        // todo:给后端发信息图床删图
+    function deleteImage(string memory _url) public imageExistenceChecker(_url) returns(bool f){
         Image storage img = imageMap[_url];
-        // if(img.value == 0) return false;
-        
-        // owner.have - url
-        for(uint i = 0; i < img.reporter.length; i++) {
-            userMap[img.reporter[i]].money += img.value / img.reporter.length;
-        }
-        // img.reporter
-        // reporter.moner += img.money
+        for(uint i = 0; i < img.reporter.length; i++) 
+            balanceOf[img.reporter[i]] += img.value / img.reporter.length;
         delete imageMap[_url];
         return true;
     }
 
-    // 点赞
-    function likeAction(address sender, string memory _url) external userChecker imageExistenceChecker(_url) returns(bool){
+    function likeAction(address sender, string memory _url) external imageExistenceChecker(_url) returns(bool){
         Image storage img = imageMap[_url];
         // if(img.value == 0) return false; 
-        if(img.isAction[sender] == Attitude.dislike) {
-            img.bad -= 1;
-        }
-        img.good += 1;
+        if(img.isAction[sender] == Attitude.dislike) img.bad -= reportWeight;
+        img.good += likeWeight;
         img.isAction[sender] = Attitude.like;
         img.liker.push(msg.sender);
         return true;
     }
 
-    // 举报
-    function reportAction(string memory _url) external userChecker imageExistenceChecker(_url) returns(bool){
+    function reportAction(string memory _url) external imageExistenceChecker(_url) returns(bool){
         Image storage img = imageMap[_url];
-        // User storage user = userMap[msg.sender];
-        if(img.value == 0) return false; 
-        // 处理由点赞变成点踩的用户
-        if(img.isAction[msg.sender] == Attitude.like) {
-            img.good -= 1;   
-            // 删除喜欢的标记 -todo：目前没找到合适的数据结构
-            // delete img.like[]
-        } 
-        img.bad += 1;
+        if(img.isAction[msg.sender] == Attitude.like) img.good -= likeWeight;   
+        img.bad += reportWeight;
         img.isAction[msg.sender] = Attitude.dislike;
         img.reporter.push(msg.sender);
-
-        if(checkimg(_url)) {
-            delimg(_url);
-        }
+        if(checkImage(_url)) deleteImage(_url);        
         return true;
     }
 
     function random(uint x, uint y) public view returns(uint num) {
-        return uint(keccak256(abi.encodePacked(block.timestamp,block.difficulty,  msg.sender))) % y + x;
+        return uint(keccak256(abi.encodePacked(block.timestamp,block.prevrandao,  msg.sender))) % y + x;
     }
 
-    function getRandomUrl() external userChecker returns(string memory _url) {
-        // msg.sender
-        // images
+    function getRandomUrl() external returns(string memory _url) {
         uint len = images.length;
         uint randIndex;
-        User storage user = userMap[msg.sender];
-        while(true) {
+        uint num = 0;
+        
+        while(num < 1000) {
             randIndex = random(0, len);
             Image storage image = images[randIndex];
             if(image.value == 0) {
+                num ++;
                 continue;
             }
             _url = image.url;
-            if(user.visit[_url] == false) {
-                user.visit[_url] = true;
-                image.good += random(0, 4) / 10;
+            if (visit[msg.sender][_url] == false) {
+                visit[msg.sender][_url] = true;
+                image.good += 1;
             }
             break;   
         }
     }
-
-    // 转账功能 
-    // transfer 引用合约20实现
-
-
-    // todo：打赏？
-
 }
 
-/*
-// 每个城市的限制100个 
-每个省份限制100个，采用web前端获取用户ip判断所在地实现
-
-*/
-
-contract DoorCityNFT {
-    enum city{
-        nul,
-        shanghai,
-        beijing,
-        guangzhou,
-        shenzhen,
-        chengdu,
-        shenyang,
-        hangzhou,
-        xian,
-        chongqing,
-        tianjin,
-        qingdao,
-        shijiazhuang,
-        haerbin,
-        changchun,
-        yangzhou,
-        zhengzhou
-    }
-}
-
-/*
-
-用户登陆就是能用用户的钱包调用合约！！！
-
-todo task list
-- 随机访问 finished
-- 上传图床
-
-- 所有城市的拼音名称 
-*/
